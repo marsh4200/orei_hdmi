@@ -1,6 +1,6 @@
 # 🖥️ OREI HDMI Matrix for Home Assistant
 
-##VER 0.0.1
+Version 0.0.1
 A custom [Home Assistant](https://www.home-assistant.io/) integration by **@marsh4200** for controlling and monitoring **OREI HDMI Matrix Switches** via **TCP/IP**.
 
 This integration allows you to manage HDMI inputs, outputs, and power directly from Home Assistant — completely **local**, with **no cloud dependency**.
