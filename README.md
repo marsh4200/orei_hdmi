@@ -19,8 +19,6 @@ This integration allows you to manage HDMI inputs, outputs, and power directly f
 |----------|--------------|
 | 🎛️ **Input Switching** | Change HDMI input routing for each output. |
 | 🔌 **Power Control** | Turn matrix ON/OFF directly from Home Assistant. |
-| 🧠 **Auto Detection** | Automatically detects number of outputs (up to 4). |
-| 🖲️ **Config Flow UI** | Configure IP & Port directly in the HA UI. |
 | 🌐 **Local TCP Control** | No cloud — full LAN communication using Telnet-like commands. |
 
 ---
