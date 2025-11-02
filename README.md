@@ -28,7 +28,6 @@ Once added, install it from HACS, **restart Home Assistant**, and click the **In
 
 > 💡 **Tip:** You can confirm your Matrix’s IP address from your router’s **DHCP client list** or on the **device’s front panel / web menu** under **Network Settings**.
 
-
 ---
 
 ## ⚙️ Features
@@ -36,25 +35,29 @@ Once added, install it from HACS, **restart Home Assistant**, and click the **In
 | Feature | Description |
 |----------|--------------|
 | 🎛️ **Input Switching** | Change HDMI input routing for each output. |
-| 🔌 **Power Control** | Turn matrix ON/OFF directly from Home Assistant. |
-| 🌐 **Local TCP Control** | No cloud — full LAN communication using Telnet-like commands. |
+| 🔌 **Power Control** | Turn the HDMI Matrix ON/OFF directly from Home Assistant. |
+| 🌐 **Local TCP Control** | 100% local control using Telnet-style TCP commands — no cloud required. |
 
 ---
 
-## 🧩 Installation
+## 🧱 Entities Created
 
-### 🔹 Option 1 — Install via HACS 🧠
-
-Simply click the **blue “Open My HACS Repository”** button above.  
-This will automatically open HACS and add the **OREI HDMI Matrix (Local)** integration to your Home Assistant — no manual steps needed. 🧠
-
-Once added, install it from HACS, **restart Home Assistant**, and click the **Integrate OREI HDMI Matrix** button to finish setup.
-
-**Enter your Matrix details:**  
-- **IP Address:** Enter the local IP address of your OREI HDMI Matrix (for example `192.168.88.150`)  
-- **TCP Port:** Default is `23` unless you’ve configured it differently  
-- Click **Submit** to complete setup  
+| Entity Type | Name | Description |
+|--------------|------|-------------|
+| `switch` | Power | Turns the HDMI Matrix on or off |
+| `select` | Output X Input | Select which input source routes to each HDMI output |
 
 ---
 
-> 💡 **Tip:** You can confirm your Matrix’s IP address from your router’s **DHCP client list** or on the **device’s front panel / web menu** under **Network Settings**.
+## 🧩 Example Dashboard Card
+
+```yaml
+type: entities
+title: OREI HDMI Matrix
+entities:
+  - entity: switch.power
+    name: Matrix Power
+  - entity: select.output_1_input
+    name: Output 1 Source
+  - entity: select.output_2_input
+    name: Output 2 Source
