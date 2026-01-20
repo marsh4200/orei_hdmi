@@ -1,19 +1,28 @@
 """OREI HDMI Matrix integration."""
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from .const import DOMAIN
+
+from .const import DOMAIN, CONF_INPUTS, CONF_OUTPUTS, CONF_MODEL
+
 
 PLATFORMS = ["switch", "select"]
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up OREI HDMI Matrix from a config entry."""
     hass.data.setdefault(DOMAIN, {})
+
     hass.data[DOMAIN][entry.entry_id] = {
         "host": entry.data.get("host"),
         "port": entry.data.get("port"),
+        CONF_MODEL: entry.data.get(CONF_MODEL),
+        CONF_INPUTS: entry.data.get(CONF_INPUTS),
+        CONF_OUTPUTS: entry.data.get(CONF_OUTPUTS),
     }
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload OREI HDMI Matrix config entry."""
