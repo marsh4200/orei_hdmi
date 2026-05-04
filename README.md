@@ -1,6 +1,5 @@
 # 🖥️ OREI HDMI Matrix for Home Assistant
 
-### Version: `0.0.1`
 
 
 
