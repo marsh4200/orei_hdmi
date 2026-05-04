@@ -23,7 +23,7 @@ This will automatically open HACS and add the **OREI HDMI Matrix (Local)** integ
 Once added, install it from HACS, **restart Home Assistant**, and click the **Integrate OREI HDMI Matrix** button to finish setup.
 
 **Enter your Matrix details:**  
-- **IP Address:** Enter the local IP address of your OREI HDMI Matrix (for example `192.168.88.150`)  
+- **IP Address:** Enter the local IP address of your OREI HDMI Matrix (for example `192.168.10.150`)  
 - **TCP Port:** Default is `8000` unless you’ve configured it differently  
 - Click **Submit** to complete setup  
 
