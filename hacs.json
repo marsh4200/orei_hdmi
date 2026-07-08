@@ -1,0 +1,5 @@
+{
+  "name": "OREI HDMI Matrix",
+  "domains": ["media_player", "switch", "select", "button", "binary_sensor"],
+  "render_readme": true
+}

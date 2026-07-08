@@ -1,0 +1,94 @@
+refresh:
+  name: Refresh
+  description: Immediately re-poll all OREI matrices (power, routing, links).
+
+set_route:
+  name: Set route
+  description: Route an input to an output.
+  fields:
+    input:
+      name: Input
+      description: Input number to route.
+      required: true
+      example: 2
+      selector:
+        number:
+          min: 1
+          max: 32
+          mode: box
+    output:
+      name: Output
+      description: Output number to route the input to.
+      required: true
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 32
+          mode: box
+    host:
+      name: Host
+      description: IP of the matrix (only needed if you have more than one).
+      required: false
+      example: 192.168.10.150
+      selector:
+        text:
+
+set_cec:
+  name: Send CEC command
+  description: Send a CEC command to an input source or an output display.
+  fields:
+    target:
+      name: Target
+      description: Whether the CEC command targets an input or an output.
+      required: true
+      default: input
+      selector:
+        select:
+          options:
+            - input
+            - output
+    id:
+      name: ID
+      description: Input or output number.
+      required: true
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 32
+          mode: box
+    command:
+      name: Command
+      description: CEC command (e.g. on, off, volume+, volume-, mute).
+      required: true
+      example: "on"
+      selector:
+        text:
+    host:
+      name: Host
+      description: IP of the matrix (only needed if you have more than one).
+      required: false
+      selector:
+        text:
+
+cycle_source:
+  name: Cycle source
+  description: Advance an output to the next input.
+  fields:
+    output:
+      name: Output
+      description: Output to cycle.
+      required: true
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 32
+          mode: box
+    host:
+      name: Host
+      description: IP of the matrix (only needed if you have more than one).
+      required: false
+      selector:
+        text:

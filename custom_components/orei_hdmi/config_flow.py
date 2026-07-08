@@ -1,15 +1,39 @@
-"""Config flow for OREI HDMI Matrix."""
-import asyncio
-import re
+"""Config and options flow for the OREI HDMI Matrix."""
+from __future__ import annotations
+
+import logging
+
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.const import CONF_HOST, CONF_PORT
+from homeassistant.core import callback
 
-from .const import DOMAIN, DEFAULT_PORT, CONF_INPUTS, CONF_OUTPUTS, CONF_MODEL
+from .const import (
+    CONF_ENABLE_BUTTON,
+    CONF_ENABLE_LINK_SENSORS,
+    CONF_ENABLE_MEDIA_PLAYER,
+    CONF_ENABLE_SELECT,
+    CONF_HOST,
+    CONF_INPUT_NAMES,
+    CONF_INPUTS,
+    CONF_MODEL,
+    CONF_OUTPUT_NAMES,
+    CONF_OUTPUTS,
+    CONF_PORT,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_ENABLE_BUTTON,
+    DEFAULT_ENABLE_LINK_SENSORS,
+    DEFAULT_ENABLE_MEDIA_PLAYER,
+    DEFAULT_ENABLE_SELECT,
+    DEFAULT_PORT,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+)
+from .coordinator import OreiHdmiClient
 
+_LOGGER = logging.getLogger(__name__)
 
-DATA_SCHEMA = vol.Schema(
+USER_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_HOST): str,
         vol.Optional(CONF_PORT, default=DEFAULT_PORT): int,
@@ -17,111 +41,140 @@ DATA_SCHEMA = vol.Schema(
 )
 
 
-async def _probe_matrix(host: str, port: int) -> tuple[str | None, int, int]:
-    """Probe the matrix to detect model and input/output counts."""
-    model: str | None = None
-    num_inputs = 8   # sensible defaults
-    num_outputs = 8
-
-    try:
-        reader, writer = await asyncio.open_connection(host, port)
-
-        # Try to get the model name
-        try:
-            writer.write(b"r type!")
-            await writer.drain()
-            await asyncio.sleep(0.05)
-            data = await reader.read(512)
-            if data:
-                text = data.decode(errors="ignore").strip()
-                # First non-empty line is usually the model
-                for line in text.splitlines():
-                    if line.strip():
-                        model = line.strip()
-                        break
-        except Exception:
-            # Non-fatal – we can still continue
-            pass
-
-        # Now query the AV crosspoint mapping
-        try:
-            writer.write(b"r av out 0!")
-            await writer.drain()
-            await asyncio.sleep(0.1)
-            data = await reader.read(4096)
-        finally:
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except Exception:
-                pass
-
-        if data:
-            text = data.decode(errors="ignore").lower()
-            inputs_seen = set()
-            outputs_seen = set()
-
-            # Typical lines: "input 1 -> output 1"
-            for line in text.splitlines():
-                m = re.search(r"input\s*(\d+)\s*->\s*output\s*(\d+)", line)
-                if m:
-                    inputs_seen.add(int(m.group(1)))
-                    outputs_seen.add(int(m.group(2)))
-
-            if inputs_seen:
-                num_inputs = max(inputs_seen)
-            if outputs_seen:
-                num_outputs = max(outputs_seen)
-
-    except Exception:
-        # If anything fails, just fall back to defaults
-        pass
-
-    # Safety clamp – most OREI units are <= 8x8
-    num_inputs = max(1, min(num_inputs, 32))
-    num_outputs = max(1, min(num_outputs, 32))
-
-    return model, num_inputs, num_outputs
-
-
 class OreiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Handle the initial setup."""
+
     VERSION = 1
 
     async def async_step_user(self, user_input=None):
-        errors = {}
+        errors: dict[str, str] = {}
 
         if user_input is not None:
             host = user_input[CONF_HOST]
             port = user_input.get(CONF_PORT, DEFAULT_PORT)
 
-            # First just test basic connectivity
+            await self.async_set_unique_id(host)
+            self._abort_if_unique_id_configured()
+
+            client = OreiHdmiClient(host, port)
             try:
-                reader, writer = await asyncio.open_connection(host, port)
-                writer.close()
-                try:
-                    await writer.wait_closed()
-                except Exception:
-                    pass
-            except Exception:
+                await client.connect()
+                model, num_inputs, num_outputs = await client.probe()
+            except Exception:  # noqa: BLE001
                 errors["base"] = "cannot_connect"
             else:
-                # If reachable, probe the matrix for model / IO counts
-                model, num_inputs, num_outputs = await _probe_matrix(host, port)
-
-                title = model or f"OREI {host}"
-
-                data = {
-                    CONF_HOST: host,
-                    CONF_PORT: port,
-                    CONF_MODEL: model,
-                    CONF_INPUTS: num_inputs,
-                    CONF_OUTPUTS: num_outputs,
-                }
-
-                return self.async_create_entry(title=title, data=data)
+                await client.disconnect()
+                return self.async_create_entry(
+                    title=model if model != "Unknown" else f"OREI Matrix ({host})",
+                    data={
+                        CONF_HOST: host,
+                        CONF_PORT: port,
+                        CONF_MODEL: model,
+                        CONF_INPUTS: num_inputs,
+                        CONF_OUTPUTS: num_outputs,
+                    },
+                )
+            finally:
+                await client.disconnect()
 
         return self.async_show_form(
-            step_id="user",
-            data_schema=DATA_SCHEMA,
-            errors=errors,
+            step_id="user", data_schema=USER_SCHEMA, errors=errors
         )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return OreiOptionsFlow(config_entry)
+
+
+class OreiOptionsFlow(config_entries.OptionsFlow):
+    """Let the user name inputs/outputs and toggle features after setup."""
+
+    def __init__(self, config_entry) -> None:
+        self.config_entry = config_entry
+
+    async def async_step_init(self, user_input=None):
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["names", "settings"],
+        )
+
+    async def async_step_names(self, user_input=None):
+        data = self.config_entry.data
+        options = self.config_entry.options
+        num_inputs = data.get(CONF_INPUTS, 8)
+        num_outputs = data.get(CONF_OUTPUTS, 8)
+        input_names = options.get(CONF_INPUT_NAMES, {})
+        output_names = options.get(CONF_OUTPUT_NAMES, {})
+
+        if user_input is not None:
+            new_inputs = {}
+            new_outputs = {}
+            for i in range(1, num_inputs + 1):
+                val = user_input.get(f"input_{i}", "").strip()
+                if val:
+                    new_inputs[str(i)] = val
+            for o in range(1, num_outputs + 1):
+                val = user_input.get(f"output_{o}", "").strip()
+                if val:
+                    new_outputs[str(o)] = val
+            new_options = dict(options)
+            new_options[CONF_INPUT_NAMES] = new_inputs
+            new_options[CONF_OUTPUT_NAMES] = new_outputs
+            return self.async_create_entry(title="", data=new_options)
+
+        schema: dict = {}
+        for i in range(1, num_inputs + 1):
+            schema[
+                vol.Optional(
+                    f"input_{i}",
+                    description={"suggested_value": input_names.get(str(i), "")},
+                )
+            ] = str
+        for o in range(1, num_outputs + 1):
+            schema[
+                vol.Optional(
+                    f"output_{o}",
+                    description={"suggested_value": output_names.get(str(o), "")},
+                )
+            ] = str
+
+        return self.async_show_form(step_id="names", data_schema=vol.Schema(schema))
+
+    async def async_step_settings(self, user_input=None):
+        options = self.config_entry.options
+
+        if user_input is not None:
+            new_options = dict(options)
+            new_options.update(user_input)
+            return self.async_create_entry(title="", data=new_options)
+
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_SCAN_INTERVAL,
+                    default=options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+                ): vol.All(int, vol.Range(min=5, max=600)),
+                vol.Optional(
+                    CONF_ENABLE_MEDIA_PLAYER,
+                    default=options.get(
+                        CONF_ENABLE_MEDIA_PLAYER, DEFAULT_ENABLE_MEDIA_PLAYER
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_SELECT,
+                    default=options.get(CONF_ENABLE_SELECT, DEFAULT_ENABLE_SELECT),
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_BUTTON,
+                    default=options.get(CONF_ENABLE_BUTTON, DEFAULT_ENABLE_BUTTON),
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_LINK_SENSORS,
+                    default=options.get(
+                        CONF_ENABLE_LINK_SENSORS, DEFAULT_ENABLE_LINK_SENSORS
+                    ),
+                ): bool,
+            }
+        )
+        return self.async_show_form(step_id="settings", data_schema=schema)

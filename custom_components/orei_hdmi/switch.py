@@ -1,62 +1,42 @@
-"""Switch platform for OREI: Power control."""
+"""Power switch for the OREI HDMI Matrix."""
+from __future__ import annotations
+
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-import asyncio
-from .const import DOMAIN, DEFAULT_PORT
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
-    host = entry.data.get("host")
-    port = entry.data.get("port", DEFAULT_PORT)
-    async_add_entities([OreiPowerSwitch(entry.entry_id, host, port)])
+from .const import DOMAIN
+from .entity import OreiBaseEntity
 
-class OreiPowerSwitch(SwitchEntity):
-    _attr_has_entity_name = True
 
-    def __init__(self, entry_id, host, port):
-        self._entry_id = entry_id
-        self._host = host
-        self._port = port
-        self._is_on = None
-        self._attr_name = "Power"
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
+    store = hass.data[DOMAIN][entry.entry_id]
+    async_add_entities([OreiPowerSwitch(store["coordinator"], entry, store["client"])])
+
+
+class OreiPowerSwitch(OreiBaseEntity, SwitchEntity):
+    """Master power for the matrix."""
+
+    _attr_name = "Power"
+    _attr_icon = "mdi:power"
+
+    def __init__(self, coordinator, entry, client) -> None:
+        super().__init__(coordinator, entry)
+        self._client = client
+        self._attr_unique_id = f"{entry.entry_id}_power"
 
     @property
-    def is_on(self):
-        return self._is_on
+    def is_on(self) -> bool | None:
+        data = self.coordinator.data or {}
+        return data.get("power")
 
-    async def async_turn_on(self, **kwargs):
-        await self._send_command("s power 1!")
-        self._is_on = True
-        self.async_write_ha_state()
+    async def async_turn_on(self, **kwargs) -> None:
+        await self._client.set_power(True)
+        await self.coordinator.async_request_refresh()
 
-    async def async_turn_off(self, **kwargs):
-        await self._send_command("s power 0!")
-        self._is_on = False
-        self.async_write_ha_state()
-
-    async def async_update(self):
-        try:
-            resp = await self._send_command("r power!")
-            if resp and "power on" in resp.lower():
-                self._is_on = True
-            elif resp and "power off" in resp.lower():
-                self._is_on = False
-        except Exception:
-            pass
-
-    async def _send_command(self, cmd: str):
-        try:
-            reader, writer = await asyncio.open_connection(self._host, self._port)
-            writer.write(cmd.encode())
-            await writer.drain()
-            await asyncio.sleep(0.1)
-            data = await reader.read(1024)
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except Exception:
-                pass
-            return data.decode(errors='ignore') if data else ""
-        except Exception:
-            return ""
+    async def async_turn_off(self, **kwargs) -> None:
+        await self._client.set_power(False)
+        await self.coordinator.async_request_refresh()

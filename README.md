@@ -1,66 +1,118 @@
 # 🖥️ OREI HDMI Matrix for Home Assistant
 
+A local, cloud-free [Home Assistant](https://www.home-assistant.io/) integration by **@marsh4200** for controlling and monitoring **OREI HDMI Matrix switches** over **TCP/IP (telnet)**.
 
-
-
-A custom [Home Assistant](https://www.home-assistant.io/) integration by **@marsh4200** for controlling and monitoring **OREI HDMI Matrix Switches** via **TCP/IP**.
-
-This integration allows you to manage HDMI inputs, outputs, and power directly from Home Assistant — completely **local**, with **no cloud dependency**.
-
----
+Route inputs to outputs, control power, send CEC commands, and see live HDMI link status — all from Home Assistant, with a matching Lovelace card.
 
 [![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=marsh4200&repository=orei_hdmi&category=integration)
 
 ---
 
+## ✨ Features
+
+- 🧠 **Auto-detection** of the model and input/output counts — no manual counting
+- 🔌 **Power control** (master on/off) as a `switch`
+- 🎛 **Per-zone media players** with source selection and CEC on/off
+- 🎚 **Per-output routing `select`** entities (automation-friendly, kept for backwards compatibility)
+- 🔗 **HDMI link sensors** — see which inputs/outputs actually have a cable connected
+- ⏭ **Optional "next source" buttons** per zone
+- 🧩 **One device** grouping every entity, with stable unique IDs (rename freely in the UI)
+- 🏷 **Friendly naming** of inputs and outputs via the options flow
+- 🔄 **Services**: `refresh`, `set_route`, `set_cec`, `cycle_source`
+- ⚡ **Persistent connection** with automatic reconnect (no socket churn)
+- 🃏 **Companion Lovelace card** with zone auto-discovery
+
+---
+
 ## 🧩 Installation
 
-### 🔹 Option 1 — Install via HACS 🧠
+### Via HACS (recommended)
 
-Simply click the **blue “Open My HACS Repository”** button above.  
-This will automatically open HACS and add the **OREI HDMI Matrix (Local)** integration to your Home Assistant — no manual steps needed. 🧠
+1. Click the **Add to HACS** button above (or add `https://github.com/marsh4200/orei_hdmi` as a custom repository of type *Integration*).
+2. Install, then **restart Home Assistant**.
+3. Go to **Settings → Devices & Services → Add Integration**, search **OREI HDMI Matrix**.
+4. Enter the **IP address** and **port** (default `8000`; some OREI models use `23`). Everything else is detected automatically.
 
-Once added, install it from HACS, **restart Home Assistant**, and click the **Integrate OREI HDMI Matrix** button to finish setup.
+### Manual
 
-**Enter your Matrix details:**  
-- **IP Address:** Enter the local IP address of your OREI HDMI Matrix (for example `192.168.10.150`)  
-- **TCP Port:** Default is `8000` unless you’ve configured it differently  
-- Click **Submit** to complete setup  
+Copy `custom_components/orei_hdmi` into `<config>/custom_components/` and restart.
 
----
-
-> 💡 **Tip:** You can confirm your Matrix’s IP address from your router’s **DHCP client list** or on the **device’s front panel / web menu** under **Network Settings**.
+> 💡 Find the matrix IP from your router's DHCP list or the unit's front panel / web UI.
 
 ---
 
-## ⚙️ Features
+## ⚙️ Options
 
-| Feature | Description |
-|----------|--------------|
-| 🎛️ **Input Switching** | Change HDMI input routing for each output. |
-| 🔌 **Power Control** | Turn the HDMI Matrix ON/OFF directly from Home Assistant. |
-| 🌐 **Local TCP Control** | 100% local control using Telnet-style TCP commands — no cloud required. |
+After setup, open the integration's **Configure** button:
 
----
-
-## 🧱 Entities Created
-
-| Entity Type | Name | Description |
-|--------------|------|-------------|
-| `switch` | Power | Turns the HDMI Matrix on or off |
-| `select` | Output X Input | Select which input source routes to each HDMI output |
+- **Name inputs & outputs** — give friendly names like *Apple TV* or *Living Room*. Blank falls back to `Input N` / `Output N`.
+- **Polling & entities** — set the poll interval and toggle which entity types are created (media players, routing selects, buttons, link sensors).
 
 ---
 
-## 🧩 Example Dashboard Card
+## 🧱 Entities
+
+| Type | Example | Description |
+|------|---------|-------------|
+| `switch` | Power | Master matrix power |
+| `media_player` | Living Room | Zone with source dropdown + CEC on/off |
+| `select` | Living Room source | Input routed to this output |
+| `binary_sensor` | Apple TV link | HDMI cable/link present (connectivity) |
+| `button` | Living Room next source | Cycles to the next input (optional) |
+
+---
+
+## 🃏 Companion card
+
+Add `card/orei-hdmi-card.js` as a Lovelace resource (drop it in `/config/www/` and add a resource pointing at `/local/orei-hdmi-card.js`, type *JavaScript Module*), then:
 
 ```yaml
-type: entities
-title: OREI HDMI Matrix
-entities:
-  - entity: switch.power
-    name: Matrix Power
-  - entity: select.output_1_input
-    name: Output 1 Source
-  - entity: select.output_2_input
-    name: Output 2 Source
+type: custom:orei-hdmi-card
+# everything below is optional:
+# title: Cinema Matrix
+# host: 192.168.10.150      # only if you run more than one matrix
+# show_links: true
+# columns: 2
+```
+
+The card auto-discovers zones from the integration, so no entity list is needed.
+
+---
+
+## 🔧 Services
+
+```yaml
+# Route input 2 to output 1
+service: orei_hdmi.set_route
+data:
+  input: 2
+  output: 1
+
+# CEC: turn on the display on output 1
+service: orei_hdmi.set_cec
+data:
+  target: output
+  id: 1
+  command: "on"
+
+# Cycle output 1 to the next input
+service: orei_hdmi.cycle_source
+data:
+  output: 1
+
+# Force an immediate state refresh
+service: orei_hdmi.refresh
+```
+
+> If you have multiple matrices, add `host: <ip>` to target a specific one.
+
+---
+
+## 📝 Notes
+
+- Adding stable unique IDs means entities from very early builds (which had none) may reappear with new IDs — the old ones can be safely removed.
+- All commands use OREI's ASCII protocol (`s in X av out Y!`, `s power 1!`, `r av out 0!`, `s cec ...!`, `r link ...!`).
+
+---
+
+© 2025 marsh4200 — MIT licensed (see `LICENSE`).
