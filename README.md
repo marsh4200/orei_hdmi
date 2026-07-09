@@ -1,6 +1,6 @@
 # 🖥️ OREI HDMI Matrix for Home Assistant
 
-A local, cloud-free [Home Assistant](https://www.home-assistant.io/) integration by **@marsh4200** for controlling and monitoring **OREI HDMI Matrix switches** over **TCP/IP (telnet)**.
+A local, cloud-free [Home Assistant](https://www.home-assistant.io/) integration by **@marsh4200** for controlling and monitoring **OREI HDMI Matrix switches**. It talks to the matrix over its **HTTP JSON API** when available (richer status and real port names) and **falls back to telnet** automatically — telnet also carries CEC.
 
 Route inputs to outputs, control power, send CEC commands, and see live HDMI link status — all from Home Assistant, with a matching Lovelace card.
 
@@ -10,7 +10,9 @@ Route inputs to outputs, control power, send CEC commands, and see live HDMI lin
 
 ## ✨ Features
 
+- 🔀 **Dual transport** — prefers the device's HTTP JSON API, falls back to telnet; CEC uses telnet either way
 - 🧠 **Auto-detection** of the model and input/output counts — no manual counting
+- 🏷 **Real port names** pulled from the device (HTTP transport) — pre-filled in the naming form
 - 🔌 **Power control** (master on/off) as a `switch`
 - 🎛 **Per-zone media players** with source selection and CEC on/off
 - 🎚 **Per-output routing `select`** entities (automation-friendly, kept for backwards compatibility)
@@ -31,7 +33,7 @@ Route inputs to outputs, control power, send CEC commands, and see live HDMI lin
 1. Click the **Add to HACS** button above (or add `https://github.com/marsh4200/orei_hdmi` as a custom repository of type *Integration*).
 2. Install, then **restart Home Assistant**.
 3. Go to **Settings → Devices & Services → Add Integration**, search **OREI HDMI Matrix**.
-4. Enter the **IP address** and **port** (default `8000`; some OREI models use `23`). Everything else is detected automatically.
+4. Enter the **IP address**. Ports are optional — **HTTP** defaults to `80` (tried first) and **telnet** to `8000` (some OREI models use `23`). The transport, model and I/O counts are detected automatically.
 
 ### Manual
 
@@ -64,7 +66,8 @@ After setup, open the integration's **Configure** button:
 
 ## 🃏 Companion card
 
-Add `card/orei-hdmi-card.js` as a Lovelace resource (drop it in `/config/www/` and add a resource pointing at `/local/orei-hdmi-card.js`, type *JavaScript Module*), then:
+The card is **bundled and auto-registered** as a Lovelace resource when the integration
+loads — no manual resource step needed. Just add it to a dashboard:
 
 ```yaml
 type: custom:orei-hdmi-card
@@ -75,7 +78,8 @@ type: custom:orei-hdmi-card
 # columns: 2
 ```
 
-The card auto-discovers zones from the integration, so no entity list is needed.
+The card auto-discovers zones from the integration, so no entity list is needed. (A copy
+also lives at `card/orei-hdmi-card.js` if you prefer to register it manually.)
 
 ---
 
@@ -111,7 +115,8 @@ service: orei_hdmi.refresh
 ## 📝 Notes
 
 - Adding stable unique IDs means entities from very early builds (which had none) may reappear with new IDs — the old ones can be safely removed.
-- All commands use OREI's ASCII protocol (`s in X av out Y!`, `s power 1!`, `r av out 0!`, `s cec ...!`, `r link ...!`).
+- On the **HTTP transport**, routing/power/status use the CGI JSON API (`video switch`, `set poweronoff`, `get video/output/input status`); **CEC** falls back to telnet on the CEC port (default `23`, configurable in options).
+- On the **telnet transport**, everything uses OREI's ASCII protocol (`s in X av out Y!`, `s power 1!`, `r av out 0!`, `s cec ...!`, `r link ...!`).
 
 ---
 

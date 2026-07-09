@@ -1,19 +1,28 @@
 """OREI HDMI Matrix integration."""
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 
 import voluptuous as vol
 
+from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 
 from .const import (
+    CONF_CEC_PORT,
     CONF_HOST,
+    CONF_HTTP_PORT,
     CONF_PORT,
     CONF_SCAN_INTERVAL,
+    CONF_TRANSPORT,
+    DEFAULT_CEC_PORT,
+    DEFAULT_HTTP_PORT,
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -21,21 +30,80 @@ from .const import (
     SERVICE_REFRESH,
     SERVICE_SET_CEC,
     SERVICE_SET_ROUTE,
+    TRANSPORT_TELNET,
 )
-from .coordinator import OreiHdmiClient, OreiHdmiCoordinator
+from .coordinator import OreiHdmiCoordinator, build_client
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["switch", "select", "media_player", "button", "binary_sensor"]
 
+CARD_JS = "orei-hdmi-card.js"
+CARD_URL = f"/{DOMAIN}/{CARD_JS}"
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Serve and register the companion Lovelace card automatically."""
+    card_path = Path(__file__).parent / CARD_JS
+    if not card_path.exists():
+        return True
+
+    manifest = json.loads((Path(__file__).parent / "manifest.json").read_text())
+    versioned_url = f"{CARD_URL}?v={manifest.get('version', '0')}"
+
+    try:
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(CARD_URL, str(card_path), False)]
+        )
+    except Exception:  # noqa: BLE001
+        _LOGGER.debug("Could not register static path for the Lovelace card")
+
+    # Primary: a real Lovelace resource (survives restarts).
+    await _register_card_resource(hass, versioned_url)
+    # Fallback: inject immediately so the card is usable before a refresh.
+    try:
+        add_extra_js_url(hass, versioned_url)
+    except Exception:  # noqa: BLE001
+        pass
+    return True
+
+
+async def _register_card_resource(hass: HomeAssistant, url: str) -> None:
+    """Add/refresh the card in Lovelace resources if not already present."""
+    try:
+        resources = hass.data.get("lovelace", {})
+        resources = getattr(resources, "resources", None) or (
+            resources.get("resources") if isinstance(resources, dict) else None
+        )
+        if resources is None:
+            return
+        if getattr(resources, "loaded", True) is False and hasattr(resources, "async_load"):
+            await resources.async_load()
+
+        for item in resources.async_items():
+            existing = item.get("url", "")
+            if DOMAIN in existing and CARD_JS in existing:
+                if existing != url:
+                    await resources.async_update_item(item["id"], {"url": url})
+                return
+        await resources.async_create_item({"res_type": "module", "url": url})
+        _LOGGER.info("Registered Lovelace resource: %s", url)
+    except Exception:  # noqa: BLE001
+        _LOGGER.debug("Could not auto-register Lovelace resource", exc_info=True)
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up OREI HDMI Matrix from a config entry."""
     host = entry.data[CONF_HOST]
-    port = entry.data.get(CONF_PORT, DEFAULT_PORT)
+    telnet_port = entry.data.get(CONF_PORT, DEFAULT_PORT)
+    http_port = entry.data.get(CONF_HTTP_PORT, DEFAULT_HTTP_PORT)
+    cec_port = entry.options.get(
+        CONF_CEC_PORT, entry.data.get(CONF_CEC_PORT, DEFAULT_CEC_PORT)
+    )
+    transport = entry.data.get(CONF_TRANSPORT, TRANSPORT_TELNET)
     scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
 
-    client = OreiHdmiClient(host, port)
+    client = build_client(hass, transport, host, telnet_port, http_port, cec_port)
     coordinator = OreiHdmiCoordinator(hass, client, scan_interval)
     coordinator.model = entry.data.get("model") or "Unknown"
 
@@ -77,7 +145,6 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 # --- Services -----------------------------------------------------------------
 def _pick_entry(hass: HomeAssistant, host: str | None):
-    """Return a stored entry dict, disambiguating by host if given."""
     entries = hass.data.get(DOMAIN, {})
     if not entries:
         raise HomeAssistantError("No OREI HDMI Matrix is configured")
@@ -127,10 +194,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
         await coordinator.async_request_refresh()
 
     hass.services.async_register(
-        DOMAIN,
-        SERVICE_REFRESH,
-        handle_refresh,
-        schema=vol.Schema({}),
+        DOMAIN, SERVICE_REFRESH, handle_refresh, schema=vol.Schema({})
     )
     hass.services.async_register(
         DOMAIN,

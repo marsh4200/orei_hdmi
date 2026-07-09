@@ -1,12 +1,12 @@
 {
   "domain": "orei_hdmi",
   "name": "OREI HDMI Matrix",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "integration_type": "device",
   "documentation": "https://github.com/marsh4200/orei_hdmi",
   "issue_tracker": "https://github.com/marsh4200/orei_hdmi/issues",
   "requirements": [],
-  "dependencies": [],
+  "dependencies": ["http", "frontend"],
   "codeowners": [
     "@marsh4200"
   ],

@@ -4,22 +4,41 @@ from __future__ import annotations
 DOMAIN = "orei_hdmi"
 MANUFACTURER = "OREI"
 
-# --- Connection ---------------------------------------------------------------
-# Many OREI units listen on 8000; some firmware/models use the telnet default 23.
-DEFAULT_PORT = 8000
-DEFAULT_SCAN_INTERVAL = 30  # seconds
+# --- Transports ---------------------------------------------------------------
+# The integration can talk to the matrix two ways:
+#   * "http"   -> the device's CGI JSON API (structured data, real port/EDID
+#                 names, signal detection). Preferred when reachable.
+#   * "telnet" -> the raw ASCII/telnet protocol (works on any OREI model and is
+#                 the only transport that carries CEC). Used as a fallback, and
+#                 as a side-channel for CEC even when HTTP is primary.
+TRANSPORT_HTTP = "http"
+TRANSPORT_TELNET = "telnet"
 
-# Every OREI command already ends in "!", which the matrix uses as the delimiter,
-# so no extra terminator is needed on a persistent socket. Set to "\r\n" if a
-# given firmware requires a line ending.
+# --- Connection ---------------------------------------------------------------
+# Telnet: many OREI units listen on 8000; some firmware/models use 23.
+DEFAULT_PORT = 8000              # telnet control port
+DEFAULT_HTTP_PORT = 80           # CGI JSON API port
+DEFAULT_CEC_PORT = 23            # telnet port used for CEC when HTTP is primary
+DEFAULT_SCAN_INTERVAL = 30       # seconds
+
+# CGI JSON API path (POST target).
+API_PATH = "/cgi-bin/instr"
+HTTP_TIMEOUT = 5                 # seconds
+
+# Every OREI telnet command already ends in "!", which the matrix uses as the
+# delimiter, so no extra terminator is needed on a persistent socket. Set to
+# "\r\n" if a given firmware requires a line ending.
 CMD_TERMINATOR = ""
 
-# How long to keep reading a response after the last byte before giving up.
+# How long to keep reading a telnet response after the last byte before giving up.
 READ_IDLE_TIMEOUT = 0.3
 
 # --- Config entry data keys ---------------------------------------------------
 CONF_HOST = "host"
-CONF_PORT = "port"
+CONF_PORT = "port"                # telnet port
+CONF_HTTP_PORT = "http_port"
+CONF_CEC_PORT = "cec_port"
+CONF_TRANSPORT = "transport"      # "http" or "telnet"
 CONF_MODEL = "model"
 CONF_INPUTS = "inputs"            # detected input count
 CONF_OUTPUTS = "outputs"          # detected output count
@@ -45,18 +64,36 @@ SERVICE_SET_CEC = "set_cec"
 SERVICE_CYCLE_SOURCE = "cycle_source"
 
 
-def input_name(entry, index: int) -> str:
-    """Friendly name for an input, falling back to 'Input N'."""
-    names = entry.options.get(CONF_INPUT_NAMES, {})
-    return names.get(str(index)) or f"Input {index}"
+def _clean(value) -> str:
+    return value.strip() if isinstance(value, str) else ""
 
 
-def output_name(entry, index: int) -> str:
-    """Friendly name for an output/zone, falling back to 'Output N'."""
-    names = entry.options.get(CONF_OUTPUT_NAMES, {})
-    return names.get(str(index)) or f"Output {index}"
+def input_name(entry, index: int, device_names: dict | None = None) -> str:
+    """Friendly name for an input.
+
+    Precedence: user-set option name > name reported by the device > 'Input N'.
+    """
+    user = entry.options.get(CONF_INPUT_NAMES, {})
+    if _clean(user.get(str(index))):
+        return user[str(index)].strip()
+    if device_names and _clean(device_names.get(index)):
+        return device_names[index].strip()
+    return f"Input {index}"
 
 
-def input_names(entry, count: int) -> list[str]:
+def output_name(entry, index: int, device_names: dict | None = None) -> str:
+    """Friendly name for an output/zone.
+
+    Precedence: user-set option name > name reported by the device > 'Output N'.
+    """
+    user = entry.options.get(CONF_OUTPUT_NAMES, {})
+    if _clean(user.get(str(index))):
+        return user[str(index)].strip()
+    if device_names and _clean(device_names.get(index)):
+        return device_names[index].strip()
+    return f"Output {index}"
+
+
+def input_names(entry, count: int, device_names: dict | None = None) -> list[str]:
     """Ordered list of input friendly names."""
-    return [input_name(entry, i) for i in range(1, count + 1)]
+    return [input_name(entry, i, device_names) for i in range(1, count + 1)]

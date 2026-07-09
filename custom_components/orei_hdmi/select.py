@@ -45,11 +45,11 @@ class OreiRouteSelect(OreiBaseEntity, SelectEntity):
         self._output = output
         self._num_inputs = num_inputs
         self._attr_unique_id = f"{entry.entry_id}_route_{output}"
-        self._attr_name = f"{output_name(entry, output)} source"
+        self._attr_name = f"{output_name(entry, output, self._dev_output_names)} source"
 
     @property
     def options(self) -> list[str]:
-        return input_names(self._entry, self._num_inputs)
+        return input_names(self._entry, self._num_inputs, self._dev_input_names)
 
     @property
     def current_option(self) -> str | None:
@@ -57,7 +57,7 @@ class OreiRouteSelect(OreiBaseEntity, SelectEntity):
         in_id = routing.get(self._output)
         if in_id is None:
             return None
-        return input_name(self._entry, in_id)
+        return input_name(self._entry, in_id, self._dev_input_names)
 
     async def async_select_option(self, option: str) -> None:
         try:

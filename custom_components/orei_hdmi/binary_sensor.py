@@ -50,10 +50,10 @@ class OreiLinkSensor(OreiBaseEntity, BinarySensorEntity):
         self._index = index
         self._attr_unique_id = f"{entry.entry_id}_link_{side}_{index}"
         if side == "in":
-            self._attr_name = f"{input_name(entry, index)} link"
+            self._attr_name = f"{input_name(entry, index, self._dev_input_names)} link"
             self._attr_icon = "mdi:import"
         else:
-            self._attr_name = f"{output_name(entry, index)} link"
+            self._attr_name = f"{output_name(entry, index, self._dev_output_names)} link"
             self._attr_icon = "mdi:export"
 
     @property

@@ -3,10 +3,11 @@
     "step": {
       "user": {
         "title": "OREI HDMI Matrix",
-        "description": "Enter the matrix connection details. The model and input/output counts are detected automatically.",
+        "description": "Enter the matrix IP. The integration prefers the device's HTTP API (richer status and real port names) and falls back to telnet. The model and input/output counts are detected automatically.",
         "data": {
           "host": "IP address",
-          "port": "TCP port (default 8000; some models use 23)"
+          "port": "TCP port (default 8000; some models use 23)",
+          "http_port": "HTTP API port (default 80; used first, telnet is the fallback)"
         }
       }
     },
@@ -28,7 +29,7 @@
       },
       "names": {
         "title": "Friendly names",
-        "description": "Leave a field blank to fall back to 'Input N' / 'Output N'."
+        "description": "Fields are pre-filled with the names read from the device where available. Leave a field blank to fall back to 'Input N' / 'Output N'."
       },
       "settings": {
         "title": "Polling & entities",
@@ -37,7 +38,8 @@
           "enable_media_player": "Create media player per zone",
           "enable_select": "Create routing select per output",
           "enable_button": "Create 'next source' button per output",
-          "enable_link_sensors": "Create HDMI link sensors"
+          "enable_link_sensors": "Create HDMI link sensors",
+          "cec_port": "CEC telnet port (used for CEC when on the HTTP transport; default 23)"
         }
       }
     }

@@ -43,7 +43,7 @@ class OreiCycleButton(OreiBaseEntity, ButtonEntity):
         self._output = output
         self._num_inputs = num_inputs
         self._attr_unique_id = f"{entry.entry_id}_cycle_{output}"
-        self._attr_name = f"{output_name(entry, output)} next source"
+        self._attr_name = f"{output_name(entry, output, self._dev_output_names)} next source"
 
     async def async_press(self) -> None:
         routing = (self.coordinator.data or {}).get("routing", {})

@@ -59,11 +59,11 @@ class OreiZoneMediaPlayer(OreiBaseEntity, MediaPlayerEntity):
         self._output = output
         self._num_inputs = num_inputs
         self._attr_unique_id = f"{entry.entry_id}_zone_{output}"
-        self._attr_name = output_name(entry, output)
+        self._attr_name = output_name(entry, output, self._dev_output_names)
 
     @property
     def source_list(self) -> list[str]:
-        return input_names(self._entry, self._num_inputs)
+        return input_names(self._entry, self._num_inputs, self._dev_input_names)
 
     @property
     def _routed_input(self) -> int | None:
@@ -73,7 +73,7 @@ class OreiZoneMediaPlayer(OreiBaseEntity, MediaPlayerEntity):
     @property
     def source(self) -> str | None:
         in_id = self._routed_input
-        return input_name(self._entry, in_id) if in_id else None
+        return input_name(self._entry, in_id, self._dev_input_names) if in_id else None
 
     @property
     def state(self) -> MediaPlayerState:
