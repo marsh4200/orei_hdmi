@@ -15,6 +15,8 @@
  *   host: 192.168.10.150        # filter to one matrix if you have several
  *   power: switch.orei...power  # override auto-detected power switch
  *   show_links: true            # show input link dots (default true)
+ *   show_cec: true              # show per-zone CEC buttons (default true)
+ *   show_presets: true          # show preset recall dropdown (default true)
  *   columns: 2                  # grid columns (default auto)
  */
 class OreiHdmiCard extends HTMLElement {
@@ -80,6 +82,33 @@ class OreiHdmiCard extends HTMLElement {
     this._hass.callService("switch", "toggle", { entity_id: entityId });
   }
 
+  _callCec(zone, command) {
+    this._hass.callService("orei_hdmi", "set_cec", {
+      target: "output",
+      id: zone.attributes.output,
+      command,
+      ...(zone.attributes.host ? { host: zone.attributes.host } : {}),
+    });
+  }
+
+  _presetSelect() {
+    // The integration's preset recall entity (HTTP transport only).
+    return Object.values(this._hass.states).find(
+      (s) =>
+        s.entity_id.startsWith("select.") &&
+        /orei/i.test(s.entity_id) &&
+        /preset/i.test(s.entity_id) &&
+        Array.isArray(s.attributes.options)
+    );
+  }
+
+  _recallPreset(entityId, option) {
+    this._hass.callService("select", "select_option", {
+      entity_id: entityId,
+      option,
+    });
+  }
+
   _render() {
     if (!this._hass) return;
     const zones = this._zones();
@@ -143,6 +172,16 @@ class OreiHdmiCard extends HTMLElement {
         .on { background: var(--success-color, #4caf50); }
         .off { background: var(--error-color, #f44336); }
         .empty { color: var(--secondary-text-color); padding: 8px 0; }
+        .cec { display: flex; gap: 6px; margin-top: 8px; }
+        .cec button {
+          flex: 1; border: none; cursor: pointer; border-radius: 8px; padding: 6px 0;
+          background: var(--card-background-color); color: var(--primary-text-color);
+          border: 1px solid var(--divider-color); font-size: .9rem;
+        }
+        .cec button:active { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+        .preset { margin: 4px 0 12px; display: flex; align-items: center; gap: 8px; }
+        .preset label { font-size: .8rem; color: var(--secondary-text-color); }
+        .preset select { flex: 1; }
       </style>
       <ha-card>
         <div class="head">
@@ -153,6 +192,7 @@ class OreiHdmiCard extends HTMLElement {
               : ""
           }
         </div>
+        ${this._renderPreset()}
         ${
           zones.length
             ? `<div class="grid">${zones
@@ -171,7 +211,57 @@ class OreiHdmiCard extends HTMLElement {
     zones.forEach((z) => {
       const sel = this._root.getElementById(`sel_${z.entity_id}`);
       if (sel) sel.onchange = (e) => this._callSelect(z.entity_id, e.target.value);
+      if (this._config.show_cec !== false) {
+        [
+          ["on", "power"],
+          ["off", "power-off"],
+          ["volume_down", "vol-"],
+          ["volume_up", "vol+"],
+          ["mute", "mute"],
+        ].forEach(([cmd]) => {
+          const b = this._root.getElementById(`cec_${z.entity_id}_${cmd}`);
+          if (b) b.onclick = () => this._callCec(z, cmd);
+        });
+      }
     });
+    const preset = this._presetSelect();
+    if (preset) {
+      const ps = this._root.getElementById("preset_sel");
+      if (ps) ps.onchange = (e) => this._recallPreset(preset.entity_id, e.target.value);
+    }
+  }
+
+  _renderPreset() {
+    if (this._config.show_presets === false) return "";
+    const preset = this._presetSelect();
+    if (!preset) return "";
+    const opts = (preset.attributes.options || [])
+      .map(
+        (o) =>
+          `<option value="${o}" ${o === preset.state ? "selected" : ""}>${o}</option>`
+      )
+      .join("");
+    return `
+      <div class="preset">
+        <label>Preset</label>
+        <select id="preset_sel">
+          ${preset.state && preset.state !== "unknown" ? "" : '<option value="">—</option>'}${opts}
+        </select>
+      </div>`;
+  }
+
+  _renderCec(z) {
+    if (this._config.show_cec === false) return "";
+    const btn = (cmd, label) =>
+      `<button id="cec_${z.entity_id}_${cmd}" title="${label}">${label}</button>`;
+    return `
+      <div class="cec">
+        ${btn("on", "⏻")}
+        ${btn("off", "⭘")}
+        ${btn("volume_down", "\u2212")}
+        ${btn("volume_up", "+")}
+        ${btn("mute", "🔇")}
+      </div>`;
   }
 
   _deviceName(zone) {
@@ -196,6 +286,7 @@ class OreiHdmiCard extends HTMLElement {
         <select id="sel_${z.entity_id}">
           ${current ? "" : '<option value="">—</option>'}${opts}
         </select>
+        ${this._renderCec(z)}
       </div>`;
   }
 

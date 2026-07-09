@@ -34,11 +34,12 @@ class OreiBaseEntity(CoordinatorEntity[OreiHdmiCoordinator]):
 
     @property
     def device_info(self) -> dict:
+        firmware = (self.coordinator.data or {}).get("firmware")
         return {
             "identifiers": {(DOMAIN, self._entry.entry_id)},
             "name": self._entry.title or "OREI HDMI Matrix",
             "manufacturer": MANUFACTURER,
             "model": self._model,
-            "sw_version": self._model,
+            "sw_version": firmware or self._model,
             "configuration_url": f"http://{self._entry.data.get(CONF_HOST)}",
         }

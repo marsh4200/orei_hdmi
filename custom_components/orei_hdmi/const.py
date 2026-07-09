@@ -97,3 +97,80 @@ def output_name(entry, index: int, device_names: dict | None = None) -> str:
 def input_names(entry, count: int, device_names: dict | None = None) -> list[str]:
     """Ordered list of input friendly names."""
     return [input_name(entry, i, device_names) for i in range(1, count + 1)]
+
+
+# =============================================================================
+# CEC (native HTTP `cec command`) — index numbering differs by object type.
+# object 1 = output/display, object 0 = input/source.
+# =============================================================================
+CEC_OUTPUT_INDEX = {
+    "on": 0,
+    "off": 1,
+    "mute": 2,
+    "volume_down": 3,
+    "volume_up": 4,
+    "source": 5,
+}
+CEC_INPUT_INDEX = {
+    "on": 1,
+    "off": 2,
+    "enter": 5,
+    "play": 11,
+    "pause": 14,
+    "stop": 16,
+    "mute": 17,
+    "volume_down": 18,
+    "volume_up": 19,
+}
+
+# Friendly aliases people (and the card) may send.
+_CEC_ALIASES = {
+    "power_on": "on",
+    "poweron": "on",
+    "power_off": "off",
+    "poweroff": "off",
+    "vol+": "volume_up",
+    "vol-": "volume_down",
+    "volume+": "volume_up",
+    "volume-": "volume_down",
+    "vol_up": "volume_up",
+    "vol_down": "volume_down",
+    "volup": "volume_up",
+    "voldown": "volume_down",
+    "mute_toggle": "mute",
+}
+
+
+def normalize_cec(command: str) -> str:
+    """Fold aliases/case/spaces into a canonical CEC command name."""
+    key = str(command).strip().lower().replace(" ", "_").replace("-", "_")
+    # keep the +/- forms working before underscoring stripped them
+    raw = str(command).strip().lower().replace(" ", "")
+    if raw in _CEC_ALIASES:
+        return _CEC_ALIASES[raw]
+    if key in _CEC_ALIASES:
+        return _CEC_ALIASES[key]
+    return key
+
+
+# --- Scaler / EDID selector values -------------------------------------------
+SCALER_MODES = {"bypass": 0, "scale_4k_1080p": 1, "auto": 3}
+SCALER_MODE_NAMES = {0: "bypass", 1: "scale_4k_1080p", 3: "auto"}
+
+# --- Presets ------------------------------------------------------------------
+MAX_PRESETS = 8
+
+# --- Additional services ------------------------------------------------------
+SERVICE_RECALL_PRESET = "recall_preset"
+SERVICE_SAVE_PRESET = "save_preset"
+SERVICE_CLEAR_PRESET = "clear_preset"
+SERVICE_RENAME_PRESET = "rename_preset"
+SERVICE_SET_SCALER = "set_scaler"
+SERVICE_SET_EDID = "set_edid"
+SERVICE_SET_ARC = "set_arc"
+SERVICE_SET_PANEL_LOCK = "set_panel_lock"
+SERVICE_SET_BEEP = "set_beep"
+
+# --- Options: preset select ---------------------------------------------------
+CONF_ENABLE_PRESETS = "enable_presets"
+DEFAULT_ENABLE_PRESETS = True

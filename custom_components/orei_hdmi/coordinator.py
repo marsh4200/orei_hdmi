@@ -1,17 +1,14 @@
 """Transports and data coordinator for the OREI HDMI Matrix.
 
-Two transports implement the same control surface:
+Two transports implement the same control surface and both expose an async
+``poll()`` returning the same dict shape, so entities are transport-agnostic:
 
-* ``OreiHdmiClient`` (telnet) keeps a single TCP connection open (with a lock
-  and automatic reconnect) and parses the ASCII protocol with regexes. It works
-  on any OREI model and is the only transport that carries CEC.
-* ``OreiHttpClient`` uses the device's CGI JSON API. It returns structured data
-  including the real input/output names, model, and signal detection, and is
-  preferred when reachable. CEC is delegated to a lazily-opened telnet
-  side-channel because the JSON API has no CEC command.
-
-Both expose an async ``poll()`` that returns the same dict shape, so the
-coordinator and every entity are transport-agnostic.
+* ``OreiHdmiClient`` (telnet) — raw ASCII protocol; works on any OREI model and
+  carries CEC as words. Rich data (scaler/hdcp/edid/presets) is HTTP-only, so
+  those methods no-op / raise on telnet.
+* ``OreiHttpClient`` — the CGI JSON API (``/cgi-bin/instr``). Structured status,
+  real port + preset names, native CEC (``cec command``), and all the rich
+  per-port data.
 """
 from __future__ import annotations
 
@@ -21,21 +18,48 @@ import re
 from datetime import timedelta
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
     API_PATH,
+    CEC_INPUT_INDEX,
+    CEC_OUTPUT_INDEX,
     CMD_TERMINATOR,
     DEFAULT_CEC_PORT,
     DOMAIN,
     HTTP_TIMEOUT,
     READ_IDLE_TIMEOUT,
+    SCALER_MODES,
     TRANSPORT_HTTP,
     TRANSPORT_TELNET,
+    normalize_cec,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+_HTTP_ONLY = "This action is only supported on the HTTP (JSON API) transport."
+
+
+def _empty_rich() -> dict:
+    """Rich-data keys, defaulted empty (telnet leaves them like this)."""
+    return {
+        "input_names": {},
+        "output_names": {},
+        "presets": {},
+        "scaler": {},
+        "hdr": {},
+        "hdcp": {},
+        "arc": {},
+        "audio_mute": {},
+        "out_enable": {},
+        "edid": {},
+        "input_power": {},
+        "firmware": None,
+        "panel_lock": None,
+        "beep": None,
+    }
 
 
 # =============================================================================
@@ -78,7 +102,6 @@ class OreiHdmiClient:
 
     # -- core command handling -------------------------------------------------
     async def command_lines(self, cmd: str) -> list[str]:
-        """Send a command and return the raw response as a list of text lines."""
         async with self._lock:
             await self._ensure_connected()
             try:
@@ -101,30 +124,23 @@ class OreiHdmiClient:
 
                 if not buffer:
                     return []
-
                 text = buffer.decode("ascii", errors="ignore")
-                lines = [ln.strip(" \t\r\n>") for ln in text.splitlines()]
-                result = [ln for ln in lines if ln]
+                result = [ln.strip(" \t\r\n>") for ln in text.splitlines() if ln.strip(" \t\r\n>")]
                 _LOGGER.debug("OREI <- %s", result)
                 return result
             except Exception as err:  # noqa: BLE001
-                _LOGGER.warning(
-                    "Command '%s' failed (%s); reconnecting next time", cmd, err
-                )
+                _LOGGER.warning("Command '%s' failed (%s); reconnecting next time", cmd, err)
                 await self.disconnect()
                 raise
 
     async def command(self, cmd: str) -> str:
-        """Send a command and return the last non-empty response line."""
         lines = await self.command_lines(cmd)
         return lines[-1] if lines else ""
 
     @staticmethod
     def _echo(cmd: str, line: str) -> bool:
-        """True if a response line is just the device echoing the command back."""
         return line.lower().replace(" ", "") == cmd.lower().replace(" ", "").rstrip("!")
 
-    # -- high level API --------------------------------------------------------
     _RE_ROUTE = re.compile(r"in(?:put)?\s*(\d+).*?out(?:put)?\s*(\d+)", re.I)
     _RE_ROUTE_REV = re.compile(r"out(?:put)?\s*(\d+).*?in(?:put)?\s*(\d+)", re.I)
     _RE_IN = re.compile(r"in(?:put)?\s*(\d+)", re.I)
@@ -149,14 +165,13 @@ class OreiHdmiClient:
     async def set_route(self, input_id: int, output_id: int) -> None:
         await self.command(f"s in {input_id} av out {output_id}!")
 
-    async def set_cec_input(self, input_id: int, cec_command: str) -> None:
-        await self.command(f"s cec in {input_id} {cec_command}!")
+    async def set_cec_input(self, input_id: int, command: str) -> None:
+        await self.command(f"s cec in {input_id} {normalize_cec(command)}!")
 
-    async def set_cec_output(self, output_id: int, cec_command: str) -> None:
-        await self.command(f"s cec hdmi out {output_id} {cec_command}!")
+    async def set_cec_output(self, output_id: int, command: str) -> None:
+        await self.command(f"s cec hdmi out {output_id} {normalize_cec(command)}!")
 
     async def get_routing(self) -> dict[int, int]:
-        """Return {output_id: input_id} for every output."""
         routing: dict[int, int] = {}
         for line in await self.command_lines("r av out 0!"):
             m = self._RE_ROUTE.search(line)
@@ -182,15 +197,35 @@ class OreiHdmiClient:
     async def get_output_links(self) -> dict[int, bool]:
         return await self._links("r link out 0!", self._RE_OUT)
 
-    # Telnet cannot read friendly names off the device.
-    async def get_input_names(self) -> dict[int, str]:
-        return {}
+    # Rich data / rich commands are not available over telnet.
+    async def recall_preset(self, index: int) -> None:
+        raise HomeAssistantError(_HTTP_ONLY)
 
-    async def get_output_names(self) -> dict[int, str]:
-        return {}
+    async def save_preset(self, index: int, name: str | None = None) -> None:
+        raise HomeAssistantError(_HTTP_ONLY)
+
+    async def clear_preset(self, index: int) -> None:
+        raise HomeAssistantError(_HTTP_ONLY)
+
+    async def rename_preset(self, index: int, name: str) -> None:
+        raise HomeAssistantError(_HTTP_ONLY)
+
+    async def set_scaler(self, output_id: int, mode: int) -> None:
+        raise HomeAssistantError(_HTTP_ONLY)
+
+    async def set_edid(self, input_id: int, mode: int) -> None:
+        raise HomeAssistantError(_HTTP_ONLY)
+
+    async def set_arc(self, output_id: int, enabled: bool) -> None:
+        raise HomeAssistantError(_HTTP_ONLY)
+
+    async def set_panel_lock(self, locked: bool) -> None:
+        raise HomeAssistantError(_HTTP_ONLY)
+
+    async def set_beep(self, enabled: bool) -> None:
+        raise HomeAssistantError(_HTTP_ONLY)
 
     async def probe(self) -> tuple[str, int, int]:
-        """Detect (model, input_count, output_count)."""
         model = await self.get_type()
         routing = await self.get_routing()
         num_out = max(routing.keys(), default=8)
@@ -207,26 +242,22 @@ class OreiHdmiClient:
                 num_out = max(num_out, max(out_links))
         except Exception:  # noqa: BLE001
             pass
-        num_in = max(1, min(num_in, 32))
-        num_out = max(1, min(num_out, 32))
-        return model, num_in, num_out
+        return model, max(1, min(num_in, 32)), max(1, min(num_out, 32))
 
     async def poll(self) -> dict:
-        """One full state read for the coordinator."""
-        model = await self.get_type()
-        power = await self.get_power()
-        routing = await self.get_routing()
-        in_links = await self.get_input_links()
-        out_links = await self.get_output_links()
-        return {
-            "power": power,
-            "model": model if model != "Unknown" else None,
-            "routing": routing,
-            "in_links": in_links,
-            "out_links": out_links,
-            "input_names": {},
-            "output_names": {},
-        }
+        data = _empty_rich()
+        data.update(
+            {
+                "power": await self.get_power(),
+                "model": (await self.get_type()) or None,
+                "routing": await self.get_routing(),
+                "in_links": await self.get_input_links(),
+                "out_links": await self.get_output_links(),
+            }
+        )
+        if data["model"] == "Unknown":
+            data["model"] = None
+        return data
 
 
 # =============================================================================
@@ -243,30 +274,34 @@ class OreiHttpClient:
         host: str,
         port: int = 80,
         cec_port: int = DEFAULT_CEC_PORT,
+        num_inputs: int = 8,
+        num_outputs: int = 8,
     ) -> None:
         self._hass = hass
         self._host = host
         self._port = port
         self._cec_port = cec_port
+        self._num_in = num_inputs
+        self._num_out = num_outputs
         self._base_url = f"http://{host}:{port}{API_PATH}"
-        self._cec: OreiHdmiClient | None = None  # lazy telnet side-channel for CEC
-        self._cec_warned = False
 
     @property
     def host(self) -> str:
         return self._host
 
-    async def connect(self) -> None:  # parity with telnet client
+    def set_counts(self, num_inputs: int, num_outputs: int) -> None:
+        self._num_in = num_inputs
+        self._num_out = num_outputs
+
+    async def connect(self) -> None:
         return None
 
     async def disconnect(self) -> None:
-        if self._cec is not None:
-            await self._cec.disconnect()
-            self._cec = None
+        return None
 
     # -- low level -------------------------------------------------------------
     async def _request(self, comhead: str, **extra) -> dict:
-        import aiohttp  # local: only needed on the HTTP path
+        import aiohttp
 
         payload = {"comhead": comhead, "language": 0, **extra}
         session = async_get_clientsession(self._hass)
@@ -278,8 +313,8 @@ class OreiHttpClient:
             return data or {}
 
     # -- status reads ----------------------------------------------------------
-    async def get_status(self) -> dict:
-        return await self._request("get status")
+    async def get_system_status(self) -> dict:
+        return await self._request("get system status")
 
     async def get_video_status(self) -> dict:
         return await self._request("get video status")
@@ -291,58 +326,75 @@ class OreiHttpClient:
         return await self._request("get input status")
 
     async def get_type(self) -> str:
-        status = await self.get_status()
-        return status.get("model") or status.get("type") or "Unknown"
+        # The JSON API exposes no model string, so synthesise one from I/O counts.
+        return f"OREI {self._num_in}x{self._num_out} Matrix"
 
     # -- commands --------------------------------------------------------------
     async def set_power(self, state: bool) -> None:
         await self._request("set poweronoff", power=1 if state else 0)
 
     async def set_route(self, input_id: int, output_id: int) -> None:
-        await self._request("video switch", source=[input_id, output_id])
+        # API expects source = [output, input].
+        await self._request("video switch", source=[output_id, input_id])
 
-    # CEC has no JSON equivalent -> best-effort telnet side-channel.
-    async def _cec_client(self) -> OreiHdmiClient:
-        if self._cec is None:
-            self._cec = OreiHdmiClient(self._host, self._cec_port)
-        return self._cec
+    def _cec_port_array(self, port_id: int, count: int) -> list[int]:
+        length = max(count, port_id, 1)
+        arr = [0] * length
+        arr[port_id - 1] = 1
+        return arr
 
-    async def set_cec_input(self, input_id: int, cec_command: str) -> None:
-        try:
-            await (await self._cec_client()).set_cec_input(input_id, cec_command)
-        except Exception as err:  # noqa: BLE001
-            self._warn_cec(err)
-
-    async def set_cec_output(self, output_id: int, cec_command: str) -> None:
-        try:
-            await (await self._cec_client()).set_cec_output(output_id, cec_command)
-        except Exception as err:  # noqa: BLE001
-            self._warn_cec(err)
-
-    def _warn_cec(self, err: Exception) -> None:
-        if not self._cec_warned:
-            _LOGGER.warning(
-                "CEC over telnet side-channel (%s:%s) failed: %s. CEC needs the "
-                "matrix telnet port reachable; adjust it in the integration options.",
-                self._host,
-                self._cec_port,
-                err,
+    async def _cec(self, obj: int, port_id: int, command: str, table: dict, count: int) -> None:
+        name = normalize_cec(command)
+        if name not in table:
+            raise HomeAssistantError(
+                f"Unsupported CEC command '{command}' for "
+                f"{'output' if obj else 'input'}. Valid: {', '.join(table)}"
             )
-            self._cec_warned = True
+        await self._request(
+            "cec command",
+            object=obj,
+            port=self._cec_port_array(port_id, count),
+            index=table[name],
+        )
+
+    async def set_cec_output(self, output_id: int, command: str) -> None:
+        await self._cec(1, output_id, command, CEC_OUTPUT_INDEX, self._num_out)
+
+    async def set_cec_input(self, input_id: int, command: str) -> None:
+        await self._cec(0, input_id, command, CEC_INPUT_INDEX, self._num_in)
+
+    async def recall_preset(self, index: int) -> None:
+        await self._request("preset set", index=index)
+
+    async def save_preset(self, index: int, name: str | None = None) -> None:
+        await self._request("preset save", index=index)
+        if name:
+            await self.rename_preset(index, name)
+
+    async def clear_preset(self, index: int) -> None:
+        await self._request("preset clear", index=index)
+
+    async def rename_preset(self, index: int, name: str) -> None:
+        await self._request("preset name", index=index, name=name)
+
+    async def set_scaler(self, output_id: int, mode: int) -> None:
+        await self._request("video scaler", scaler=[output_id, mode])
+
+    async def set_edid(self, input_id: int, mode: int) -> None:
+        await self._request("set edid", edid=[input_id, mode])
+
+    async def set_arc(self, output_id: int, enabled: bool) -> None:
+        await self._request("set arc", arc=[output_id, 1 if enabled else 0])
+
+    async def set_panel_lock(self, locked: bool) -> None:
+        await self._request("set panel lock", lock=1 if locked else 0)
+
+    async def set_beep(self, enabled: bool) -> None:
+        await self._request("set beep", beep=1 if enabled else 0)
 
     # -- parsing helpers -------------------------------------------------------
     @staticmethod
-    def _routing_from_video(video: dict) -> dict[int, int]:
-        # "allsource" = [1, 2, 2, 1, 0] -> input per output, trailing 0 sentinel.
-        routing: dict[int, int] = {}
-        for idx, src in enumerate(video.get("allsource", [])):
-            if src == 0:
-                break
-            routing[idx + 1] = int(src)
-        return routing
-
-    @staticmethod
-    def _names(arr: list, skip_prefixes: tuple[str, ...] = ()) -> dict[int, str]:
+    def _names(arr, skip_prefixes: tuple[str, ...] = ()) -> dict[int, str]:
         names: dict[int, str] = {}
         for idx, name in enumerate(arr or []):
             if not isinstance(name, str) or not name.strip():
@@ -353,68 +405,97 @@ class OreiHttpClient:
             names[idx + 1] = name.strip()
         return names
 
+    @staticmethod
+    def _by_index(arr, count: int, cast=int) -> dict[int, object]:
+        out: dict[int, object] = {}
+        for idx in range(count):
+            if idx < len(arr or []):
+                out[idx + 1] = cast(arr[idx])
+        return out
+
     async def probe(self) -> tuple[str, int, int]:
-        model = await self.get_type()
         video = await self.get_video_status()
         num_in = len(video.get("allinputname", [])) or 4
-        # allsource carries a trailing sentinel; trim it for the count.
-        allsource = [s for s in video.get("allsource", []) if s != 0]
-        num_out = len(video.get("alloutputname", [])) or len(allsource) or 4
-        num_in = max(1, min(num_in, 32))
-        num_out = max(1, min(num_out, 32))
-        return model, num_in, num_out
+        num_out = len(video.get("alloutputname", [])) or 4
+        self.set_counts(max(1, min(num_in, 32)), max(1, min(num_out, 32)))
+        return await self.get_type(), self._num_in, self._num_out
 
     async def poll(self) -> dict:
+        system = await self.get_system_status()
         video = await self.get_video_status()
         output = await self.get_output_status()
         input_st = await self.get_input_status()
 
-        routing = self._routing_from_video(video)
-        input_names = self._names(video.get("allinputname", []))
-        output_names = self._names(
-            video.get("alloutputname", []), skip_prefixes=("hdmi output",)
-        )
+        n_in = self._num_in
+        n_out = self._num_out
 
-        # Input signal: "inactive" = [1, 0, 0, 0] -> 0 means a signal is present.
+        # Routing: allsource[i] = input feeding output i+1 (trailing 0 = padding).
+        routing: dict[int, int] = {}
+        allsource = video.get("allsource", [])
+        for idx in range(min(n_out, len(allsource))):
+            src = allsource[idx]
+            if src:
+                routing[idx + 1] = int(src)
+
+        input_names = self._names(video.get("allinputname", [])) or self._names(
+            input_st.get("inname", [])
+        )
+        output_names = self._names(
+            video.get("alloutputname", []), skip_prefixes=("hdmi output", "output")
+        ) or self._names(output.get("name", []), skip_prefixes=("hdmi output", "output"))
+        presets = self._names(video.get("allname", []))
+
+        # Input signal: inactive[i] == 0 -> signal present.
         in_links: dict[int, bool] = {}
-        for idx, val in enumerate(input_st.get("inactive", [])):
+        for idx, val in enumerate(input_st.get("inactive", [])[:n_in]):
             in_links[idx + 1] = val == 0
 
-        # Output connection: connected if either HDMI or HDBaseT reports a link.
-        out_links: dict[int, bool] = {}
+        # Output connection: allconnect (OR allhdbtconnect where the model has it).
         hdmi = output.get("allconnect", [])
         hdbt = output.get("allhdbtconnect", [])
-        for idx in range(max(len(hdmi), len(hdbt))):
+        out_links: dict[int, bool] = {}
+        for idx in range(n_out):
             h = hdmi[idx] if idx < len(hdmi) else 0
             b = hdbt[idx] if idx < len(hdbt) else 0
             out_links[idx + 1] = bool(h or b)
 
-        return {
-            "power": bool(video.get("power", 0)),
-            "model": None,  # filled once from probe; keeps polls to 3 requests
+        data = {
+            "power": bool(system.get("power", video.get("power", 0))),
+            "model": None,
             "routing": routing,
             "in_links": in_links,
             "out_links": out_links,
             "input_names": input_names,
             "output_names": output_names,
+            "presets": presets,
+            "scaler": self._by_index(output.get("allscaler", []), n_out),
+            "hdr": {k: bool(v) for k, v in self._by_index(output.get("allhdr", []), n_out).items()},
+            "hdcp": self._by_index(output.get("allhdcp", []), n_out),
+            "arc": {k: bool(v) for k, v in self._by_index(output.get("allarc", []), n_out).items()},
+            "audio_mute": {
+                k: bool(v) for k, v in self._by_index(output.get("allaudiomute", []), n_out).items()
+            },
+            "out_enable": {
+                k: bool(v) for k, v in self._by_index(output.get("allout", []), n_out).items()
+            },
+            "edid": self._by_index(input_st.get("edid", []), n_in),
+            "input_power": {
+                k: bool(v) for k, v in self._by_index(input_st.get("power", []), n_in).items()
+            },
+            "firmware": system.get("version"),
+            "panel_lock": bool(system["lock"]) if "lock" in system else None,
+            "beep": bool(system["beep"]) if "beep" in system else None,
         }
+        return data
 
 
 # =============================================================================
 # Transport detection / factory
 # =============================================================================
 async def async_probe_transport(
-    hass: HomeAssistant,
-    host: str,
-    http_port: int,
-    telnet_port: int,
+    hass: HomeAssistant, host: str, http_port: int, telnet_port: int
 ) -> tuple[str, str, int, int]:
-    """Detect the best transport for a host.
-
-    Tries HTTP (structured, richer) first, then telnet.
-    Returns (transport, model, num_inputs, num_outputs). Raises on total failure.
-    """
-    # 1) HTTP
+    """Detect the best transport. Tries HTTP first, then telnet."""
     try:
         http = OreiHttpClient(hass, host, http_port)
         model, num_in, num_out = await http.probe()
@@ -423,7 +504,6 @@ async def async_probe_transport(
     except Exception as err:  # noqa: BLE001
         _LOGGER.debug("HTTP probe failed for %s (%s); trying telnet", host, err)
 
-    # 2) Telnet
     telnet = OreiHdmiClient(host, telnet_port)
     try:
         await telnet.connect()
@@ -440,10 +520,12 @@ def build_client(
     telnet_port: int,
     http_port: int,
     cec_port: int,
+    num_inputs: int = 8,
+    num_outputs: int = 8,
 ):
     """Instantiate the client for a stored transport."""
     if transport == TRANSPORT_HTTP:
-        return OreiHttpClient(hass, host, http_port, cec_port)
+        return OreiHttpClient(hass, host, http_port, cec_port, num_inputs, num_outputs)
     return OreiHdmiClient(host, telnet_port)
 
 
@@ -455,13 +537,11 @@ class OreiHdmiCoordinator(DataUpdateCoordinator):
 
     def __init__(self, hass: HomeAssistant, client, scan_interval: int) -> None:
         super().__init__(
-            hass,
-            _LOGGER,
-            name=DOMAIN,
-            update_interval=timedelta(seconds=scan_interval),
+            hass, _LOGGER, name=DOMAIN, update_interval=timedelta(seconds=scan_interval)
         )
         self.client = client
         self.model: str = "Unknown"
+        self.last_preset: int | None = None
 
     async def _async_update_data(self) -> dict:
         try:
@@ -469,7 +549,6 @@ class OreiHdmiCoordinator(DataUpdateCoordinator):
         except Exception as err:  # noqa: BLE001
             raise UpdateFailed(err) from err
 
-        # Model is read once (telnet reports it every poll; HTTP leaves it None).
         if data.get("model"):
             self.model = data["model"]
         elif self.model == "Unknown":
@@ -478,4 +557,5 @@ class OreiHdmiCoordinator(DataUpdateCoordinator):
             except Exception:  # noqa: BLE001
                 pass
         data["model"] = self.model
+        data["last_preset"] = self.last_preset
         return data

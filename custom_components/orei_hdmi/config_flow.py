@@ -13,6 +13,7 @@ from .const import (
     CONF_ENABLE_BUTTON,
     CONF_ENABLE_LINK_SENSORS,
     CONF_ENABLE_MEDIA_PLAYER,
+    CONF_ENABLE_PRESETS,
     CONF_ENABLE_SELECT,
     CONF_HOST,
     CONF_HTTP_PORT,
@@ -28,6 +29,7 @@ from .const import (
     DEFAULT_ENABLE_BUTTON,
     DEFAULT_ENABLE_LINK_SENSORS,
     DEFAULT_ENABLE_MEDIA_PLAYER,
+    DEFAULT_ENABLE_PRESETS,
     DEFAULT_ENABLE_SELECT,
     DEFAULT_HTTP_PORT,
     DEFAULT_PORT,
@@ -202,6 +204,10 @@ class OreiOptionsFlow(config_entries.OptionsFlow):
                     default=options.get(
                         CONF_ENABLE_LINK_SENSORS, DEFAULT_ENABLE_LINK_SENSORS
                     ),
+                ): bool,
+                vol.Optional(
+                    CONF_ENABLE_PRESETS,
+                    default=options.get(CONF_ENABLE_PRESETS, DEFAULT_ENABLE_PRESETS),
                 ): bool,
             }
         )

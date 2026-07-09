@@ -13,6 +13,9 @@ Route inputs to outputs, control power, send CEC commands, and see live HDMI lin
 - 🔀 **Dual transport** — prefers the device's HTTP JSON API, falls back to telnet; CEC uses telnet either way
 - 🧠 **Auto-detection** of the model and input/output counts — no manual counting
 - 🏷 **Real port names** pulled from the device (HTTP transport) — pre-filled in the naming form
+- 🎛 **Native CEC** (HTTP `cec command`) with per-zone buttons in the card and a `set_cec` service
+- 💾 **Preset recall** as a `select` entity + card dropdown, plus save/rename/clear services (HTTP)
+- 📊 **Rich status** on the HTTP transport — HDCP, HDR, scaler, ARC, audio-mute, EDID, firmware — as media_player attributes
 - 🔌 **Power control** (master on/off) as a `switch`
 - 🎛 **Per-zone media players** with source selection and CEC on/off
 - 🎚 **Per-output routing `select`** entities (automation-friendly, kept for backwards compatibility)
@@ -115,8 +118,9 @@ service: orei_hdmi.refresh
 ## 📝 Notes
 
 - Adding stable unique IDs means entities from very early builds (which had none) may reappear with new IDs — the old ones can be safely removed.
-- On the **HTTP transport**, routing/power/status use the CGI JSON API (`video switch`, `set poweronoff`, `get video/output/input status`); **CEC** falls back to telnet on the CEC port (default `23`, configurable in options).
-- On the **telnet transport**, everything uses OREI's ASCII protocol (`s in X av out Y!`, `s power 1!`, `r av out 0!`, `s cec ...!`, `r link ...!`).
+- On the **HTTP transport**, everything uses the CGI JSON API: routing (`video switch`, `source:[output,input]`), power (`set poweronoff`), status (`get system/video/output/input status`), **CEC** (`cec command`, native), presets, scaler, EDID and ARC.
+- On the **telnet transport**, everything uses OREI's ASCII protocol (`s in X av out Y!`, `s power 1!`, `r av out 0!`, `s cec ...!`, `r link ...!`). Preset/scaler/EDID/ARC services are HTTP-only.
+- **CEC commands** — outputs: `on`, `off`, `mute`, `volume_up`, `volume_down`, `source`; inputs: `on`, `off`, `enter`, `play`, `pause`, `stop`, `mute`, `volume_up`, `volume_down`.
 
 ---
 

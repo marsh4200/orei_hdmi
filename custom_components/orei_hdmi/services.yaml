@@ -1,6 +1,6 @@
 refresh:
   name: Refresh
-  description: Immediately re-poll all OREI matrices (power, routing, links).
+  description: Immediately re-poll all OREI matrices (power, routing, links, status).
 
 set_route:
   name: Set route
@@ -12,20 +12,14 @@ set_route:
       required: true
       example: 2
       selector:
-        number:
-          min: 1
-          max: 32
-          mode: box
+        number: { min: 1, max: 32, mode: box }
     output:
       name: Output
       description: Output number to route the input to.
       required: true
       example: 1
       selector:
-        number:
-          min: 1
-          max: 32
-          mode: box
+        number: { min: 1, max: 32, mode: box }
     host:
       name: Host
       description: IP of the matrix (only needed if you have more than one).
@@ -36,13 +30,16 @@ set_route:
 
 set_cec:
   name: Send CEC command
-  description: Send a CEC command to an input source or an output display.
+  description: >
+    Send a CEC command to an input source or an output display. On the HTTP
+    transport this uses the native cec command; on telnet it uses the ASCII CEC
+    protocol. Available commands differ between inputs and outputs.
   fields:
     target:
       name: Target
       description: Whether the CEC command targets an input or an output.
       required: true
-      default: input
+      default: output
       selector:
         select:
           options:
@@ -54,17 +51,28 @@ set_cec:
       required: true
       example: 1
       selector:
-        number:
-          min: 1
-          max: 32
-          mode: box
+        number: { min: 1, max: 32, mode: box }
     command:
       name: Command
-      description: CEC command (e.g. on, off, volume+, volume-, mute).
+      description: >
+        Output commands: on, off, mute, volume_up, volume_down, source.
+        Input commands: on, off, enter, play, pause, stop, mute, volume_up, volume_down.
       required: true
       example: "on"
       selector:
-        text:
+        select:
+          custom_value: true
+          options:
+            - "on"
+            - "off"
+            - mute
+            - volume_up
+            - volume_down
+            - source
+            - play
+            - pause
+            - stop
+            - enter
     host:
       name: Host
       description: IP of the matrix (only needed if you have more than one).
@@ -82,13 +90,191 @@ cycle_source:
       required: true
       example: 1
       selector:
-        number:
-          min: 1
-          max: 32
-          mode: box
+        number: { min: 1, max: 32, mode: box }
     host:
       name: Host
       description: IP of the matrix (only needed if you have more than one).
+      required: false
+      selector:
+        text:
+
+recall_preset:
+  name: Recall preset
+  description: Load a saved routing preset (HTTP transport only).
+  fields:
+    index:
+      name: Preset
+      description: Preset slot to recall.
+      required: true
+      example: 1
+      selector:
+        number: { min: 1, max: 8, mode: box }
+    host:
+      name: Host
+      required: false
+      selector:
+        text:
+
+save_preset:
+  name: Save preset
+  description: Save the current routing to a preset slot, optionally naming it (HTTP only).
+  fields:
+    index:
+      name: Preset
+      description: Preset slot to save into.
+      required: true
+      example: 1
+      selector:
+        number: { min: 1, max: 8, mode: box }
+    name:
+      name: Name
+      description: Optional new name for the preset.
+      required: false
+      example: Movie Night
+      selector:
+        text:
+    host:
+      name: Host
+      required: false
+      selector:
+        text:
+
+clear_preset:
+  name: Clear preset
+  description: Clear a preset slot (HTTP only).
+  fields:
+    index:
+      name: Preset
+      required: true
+      example: 1
+      selector:
+        number: { min: 1, max: 8, mode: box }
+    host:
+      name: Host
+      required: false
+      selector:
+        text:
+
+rename_preset:
+  name: Rename preset
+  description: Rename a preset slot (HTTP only).
+  fields:
+    index:
+      name: Preset
+      required: true
+      example: 1
+      selector:
+        number: { min: 1, max: 8, mode: box }
+    name:
+      name: Name
+      required: true
+      example: Living Room
+      selector:
+        text:
+    host:
+      name: Host
+      required: false
+      selector:
+        text:
+
+set_scaler:
+  name: Set output scaler
+  description: Set the scaler mode for an output (HTTP only).
+  fields:
+    output:
+      name: Output
+      required: true
+      example: 1
+      selector:
+        number: { min: 1, max: 32, mode: box }
+    mode:
+      name: Mode
+      description: bypass, scale_4k_1080p, or auto.
+      required: true
+      default: auto
+      selector:
+        select:
+          options:
+            - bypass
+            - scale_4k_1080p
+            - auto
+    host:
+      name: Host
+      required: false
+      selector:
+        text:
+
+set_edid:
+  name: Set input EDID
+  description: >
+    Set the EDID mode for an input (HTTP only). Modes 1-39; e.g. 21 = 4K60 4:4:4
+    HD Audio 7.1 HDR, 24-31 copy from output 1-8.
+  fields:
+    input:
+      name: Input
+      required: true
+      example: 1
+      selector:
+        number: { min: 1, max: 32, mode: box }
+    mode:
+      name: EDID mode
+      required: true
+      example: 21
+      selector:
+        number: { min: 1, max: 39, mode: box }
+    host:
+      name: Host
+      required: false
+      selector:
+        text:
+
+set_arc:
+  name: Set ARC
+  description: Enable or disable Audio Return Channel on an output (HTTP only).
+  fields:
+    output:
+      name: Output
+      required: true
+      example: 1
+      selector:
+        number: { min: 1, max: 32, mode: box }
+    enabled:
+      name: Enabled
+      required: true
+      selector:
+        boolean:
+    host:
+      name: Host
+      required: false
+      selector:
+        text:
+
+set_panel_lock:
+  name: Set panel lock
+  description: Lock or unlock the front panel (HTTP only).
+  fields:
+    locked:
+      name: Locked
+      required: true
+      selector:
+        boolean:
+    host:
+      name: Host
+      required: false
+      selector:
+        text:
+
+set_beep:
+  name: Set beep
+  description: Enable or disable the front-panel beep (HTTP only).
+  fields:
+    enabled:
+      name: Enabled
+      required: true
+      selector:
+        boolean:
+    host:
+      name: Host
       required: false
       selector:
         text:

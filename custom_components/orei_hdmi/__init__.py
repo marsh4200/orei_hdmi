@@ -26,10 +26,20 @@ from .const import (
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    SCALER_MODES,
+    SERVICE_CLEAR_PRESET,
     SERVICE_CYCLE_SOURCE,
+    SERVICE_RECALL_PRESET,
     SERVICE_REFRESH,
+    SERVICE_RENAME_PRESET,
+    SERVICE_SAVE_PRESET,
+    SERVICE_SET_ARC,
+    SERVICE_SET_BEEP,
     SERVICE_SET_CEC,
+    SERVICE_SET_EDID,
+    SERVICE_SET_PANEL_LOCK,
     SERVICE_SET_ROUTE,
+    SERVICE_SET_SCALER,
     TRANSPORT_TELNET,
 )
 from .coordinator import OreiHdmiCoordinator, build_client
@@ -103,14 +113,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     transport = entry.data.get(CONF_TRANSPORT, TRANSPORT_TELNET)
     scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
 
-    client = build_client(hass, transport, host, telnet_port, http_port, cec_port)
+    num_inputs = entry.data.get("inputs") or 8
+    num_outputs = entry.data.get("outputs") or 8
+
+    client = build_client(
+        hass, transport, host, telnet_port, http_port, cec_port, num_inputs, num_outputs
+    )
     coordinator = OreiHdmiCoordinator(hass, client, scan_interval)
     coordinator.model = entry.data.get("model") or "Unknown"
 
     await coordinator.async_config_entry_first_refresh()
-
-    num_inputs = entry.data.get("inputs") or 8
-    num_outputs = entry.data.get("outputs") or 8
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "client": client,
@@ -193,6 +205,59 @@ def _async_register_services(hass: HomeAssistant) -> None:
         await client.set_route(nxt, output)
         await coordinator.async_request_refresh()
 
+    async def handle_recall_preset(call: ServiceCall) -> None:
+        stored = _pick_entry(hass, call.data.get("host"))
+        await stored["client"].recall_preset(call.data["index"])
+        stored["coordinator"].last_preset = call.data["index"]
+        await stored["coordinator"].async_request_refresh()
+
+    async def handle_save_preset(call: ServiceCall) -> None:
+        stored = _pick_entry(hass, call.data.get("host"))
+        await stored["client"].save_preset(call.data["index"], call.data.get("name"))
+        await stored["coordinator"].async_request_refresh()
+
+    async def handle_clear_preset(call: ServiceCall) -> None:
+        stored = _pick_entry(hass, call.data.get("host"))
+        await stored["client"].clear_preset(call.data["index"])
+        await stored["coordinator"].async_request_refresh()
+
+    async def handle_rename_preset(call: ServiceCall) -> None:
+        stored = _pick_entry(hass, call.data.get("host"))
+        await stored["client"].rename_preset(call.data["index"], call.data["name"])
+        await stored["coordinator"].async_request_refresh()
+
+    async def handle_set_scaler(call: ServiceCall) -> None:
+        stored = _pick_entry(hass, call.data.get("host"))
+        mode = call.data["mode"]
+        if isinstance(mode, str):
+            mode = SCALER_MODES.get(mode.strip().lower())
+            if mode is None:
+                raise HomeAssistantError(
+                    f"Unknown scaler mode; use one of {', '.join(SCALER_MODES)}"
+                )
+        await stored["client"].set_scaler(call.data["output"], mode)
+        await stored["coordinator"].async_request_refresh()
+
+    async def handle_set_edid(call: ServiceCall) -> None:
+        stored = _pick_entry(hass, call.data.get("host"))
+        await stored["client"].set_edid(call.data["input"], call.data["mode"])
+        await stored["coordinator"].async_request_refresh()
+
+    async def handle_set_arc(call: ServiceCall) -> None:
+        stored = _pick_entry(hass, call.data.get("host"))
+        await stored["client"].set_arc(call.data["output"], call.data["enabled"])
+        await stored["coordinator"].async_request_refresh()
+
+    async def handle_set_panel_lock(call: ServiceCall) -> None:
+        stored = _pick_entry(hass, call.data.get("host"))
+        await stored["client"].set_panel_lock(call.data["locked"])
+        await stored["coordinator"].async_request_refresh()
+
+    async def handle_set_beep(call: ServiceCall) -> None:
+        stored = _pick_entry(hass, call.data.get("host"))
+        await stored["client"].set_beep(call.data["enabled"])
+        await stored["coordinator"].async_request_refresh()
+
     hass.services.async_register(
         DOMAIN, SERVICE_REFRESH, handle_refresh, schema=vol.Schema({})
     )
@@ -233,6 +298,100 @@ def _async_register_services(hass: HomeAssistant) -> None:
         ),
     )
 
+    _preset_index = vol.All(cv.positive_int, vol.Range(min=1, max=8))
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RECALL_PRESET,
+        handle_recall_preset,
+        schema=vol.Schema(
+            {vol.Required("index"): _preset_index, vol.Optional("host"): cv.string}
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SAVE_PRESET,
+        handle_save_preset,
+        schema=vol.Schema(
+            {
+                vol.Required("index"): _preset_index,
+                vol.Optional("name"): cv.string,
+                vol.Optional("host"): cv.string,
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CLEAR_PRESET,
+        handle_clear_preset,
+        schema=vol.Schema(
+            {vol.Required("index"): _preset_index, vol.Optional("host"): cv.string}
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RENAME_PRESET,
+        handle_rename_preset,
+        schema=vol.Schema(
+            {
+                vol.Required("index"): _preset_index,
+                vol.Required("name"): cv.string,
+                vol.Optional("host"): cv.string,
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_SCALER,
+        handle_set_scaler,
+        schema=vol.Schema(
+            {
+                vol.Required("output"): cv.positive_int,
+                vol.Required("mode"): vol.Any(cv.positive_int, cv.string),
+                vol.Optional("host"): cv.string,
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_EDID,
+        handle_set_edid,
+        schema=vol.Schema(
+            {
+                vol.Required("input"): cv.positive_int,
+                vol.Required("mode"): vol.All(cv.positive_int, vol.Range(min=1, max=39)),
+                vol.Optional("host"): cv.string,
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_ARC,
+        handle_set_arc,
+        schema=vol.Schema(
+            {
+                vol.Required("output"): cv.positive_int,
+                vol.Required("enabled"): cv.boolean,
+                vol.Optional("host"): cv.string,
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_PANEL_LOCK,
+        handle_set_panel_lock,
+        schema=vol.Schema(
+            {vol.Required("locked"): cv.boolean, vol.Optional("host"): cv.string}
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_BEEP,
+        handle_set_beep,
+        schema=vol.Schema(
+            {vol.Required("enabled"): cv.boolean, vol.Optional("host"): cv.string}
+        ),
+    )
+
 
 def _async_unregister_services(hass: HomeAssistant) -> None:
     for service in (
@@ -240,5 +399,14 @@ def _async_unregister_services(hass: HomeAssistant) -> None:
         SERVICE_SET_ROUTE,
         SERVICE_SET_CEC,
         SERVICE_CYCLE_SOURCE,
+        SERVICE_RECALL_PRESET,
+        SERVICE_SAVE_PRESET,
+        SERVICE_CLEAR_PRESET,
+        SERVICE_RENAME_PRESET,
+        SERVICE_SET_SCALER,
+        SERVICE_SET_EDID,
+        SERVICE_SET_ARC,
+        SERVICE_SET_PANEL_LOCK,
+        SERVICE_SET_BEEP,
     ):
         hass.services.async_remove(DOMAIN, service)

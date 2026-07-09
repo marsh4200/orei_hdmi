@@ -39,7 +39,8 @@
           "enable_select": "Create routing select per output",
           "enable_button": "Create 'next source' button per output",
           "enable_link_sensors": "Create HDMI link sensors",
-          "cec_port": "CEC telnet port (used for CEC when on the HTTP transport; default 23)"
+          "cec_port": "CEC telnet port (used for CEC when on the HTTP transport; default 23)",
+          "enable_presets": "Preset recall control"
         }
       }
     }

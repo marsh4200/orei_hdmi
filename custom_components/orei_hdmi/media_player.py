@@ -1,7 +1,8 @@
 """Per-zone media players for the OREI HDMI Matrix.
 
 Each output is exposed as a media_player whose source list is the matrix's
-inputs. Turn on/off issues a CEC power command to the currently routed source.
+inputs. Turn on/off issues a CEC power command to the display on that output.
+Rich per-output data (HDCP/HDR/scaler/ARC/mute/EDID) rides along as attributes.
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ from .const import (
     CONF_HOST,
     DEFAULT_ENABLE_MEDIA_PLAYER,
     DOMAIN,
+    SCALER_MODE_NAMES,
     input_name,
     input_names,
     output_name,
@@ -82,12 +84,39 @@ class OreiZoneMediaPlayer(OreiBaseEntity, MediaPlayerEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        # Lets the companion Lovelace card auto-discover matrix zones.
-        return {
+        # Lets the companion Lovelace card auto-discover matrix zones and read
+        # the rich per-output data exposed by the HTTP transport.
+        data = self.coordinator.data or {}
+        o = self._output
+        in_id = self._routed_input
+        attrs = {
             "orei_hdmi": True,
-            "output": self._output,
+            "output": o,
             "host": self._entry.data.get(CONF_HOST),
+            "display_connected": (data.get("out_links", {}) or {}).get(o),
         }
+
+        def _put(key, src):
+            val = (data.get(src, {}) or {}).get(o)
+            if val is not None:
+                attrs[key] = val
+
+        _put("hdr", "hdr")
+        _put("hdcp", "hdcp")
+        _put("scaler", "scaler")
+        _put("arc", "arc")
+        _put("audio_muted", "audio_mute")
+        _put("output_enabled", "out_enable")
+        # EDID belongs to the routed input.
+        if in_id is not None:
+            edid = (data.get("edid", {}) or {}).get(in_id)
+            if edid is not None:
+                attrs["input_edid"] = edid
+        # Translate scaler code to a label for readability.
+        scaler = attrs.get("scaler")
+        if scaler is not None:
+            attrs["scaler_mode"] = SCALER_MODE_NAMES.get(scaler, str(scaler))
+        return attrs
 
     async def async_select_source(self, source: str) -> None:
         try:
@@ -99,14 +128,11 @@ class OreiZoneMediaPlayer(OreiBaseEntity, MediaPlayerEntity):
         await self.coordinator.async_request_refresh()
 
     async def async_turn_on(self) -> None:
-        in_id = self._routed_input
-        if in_id:
-            await self._client.set_cec_input(in_id, "on")
+        # Power the display on this output via CEC.
+        await self._client.set_cec_output(self._output, "on")
 
     async def async_turn_off(self) -> None:
-        in_id = self._routed_input
-        if in_id:
-            await self._client.set_cec_input(in_id, "off")
+        await self._client.set_cec_output(self._output, "off")
 
     @callback
     def _handle_coordinator_update(self) -> None:
