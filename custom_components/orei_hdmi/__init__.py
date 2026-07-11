@@ -1,7 +1,6 @@
 """OREI HDMI Matrix integration."""
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 
@@ -13,6 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.loader import async_get_integration
 
 from .const import (
     CONF_CEC_PORT,
@@ -55,11 +55,20 @@ CARD_URL = f"/{DOMAIN}/{CARD_JS}"
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Serve and register the companion Lovelace card automatically."""
     card_path = Path(__file__).parent / CARD_JS
-    if not card_path.exists():
+
+    # Filesystem check off the event loop.
+    if not await hass.async_add_executor_job(card_path.is_file):
         return True
 
-    manifest = json.loads((Path(__file__).parent / "manifest.json").read_text())
-    versioned_url = f"{CARD_URL}?v={manifest.get('version', '0')}"
+    # Version for cache-busting — read from the already-loaded integration
+    # manifest (no blocking file I/O in the event loop).
+    version = "0"
+    try:
+        integration = await async_get_integration(hass, DOMAIN)
+        version = str(integration.version or "0")
+    except Exception:  # noqa: BLE001
+        pass
+    versioned_url = f"{CARD_URL}?v={version}"
 
     try:
         await hass.http.async_register_static_paths(
