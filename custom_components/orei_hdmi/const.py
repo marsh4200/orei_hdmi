@@ -25,10 +25,11 @@ DEFAULT_SCAN_INTERVAL = 30       # seconds
 API_PATH = "/cgi-bin/instr"
 HTTP_TIMEOUT = 5                 # seconds
 
-# Every OREI telnet command already ends in "!", which the matrix uses as the
-# delimiter, so no extra terminator is needed on a persistent socket. Set to
-# "\r\n" if a given firmware requires a line ending.
-CMD_TERMINATOR = ""
+# OREI commands end in "!", but the matrix's telnet line reader still waits for
+# a CR/LF before it acts on (or replies to) a command. Without this, commands
+# are buffered forever: reads time out empty and route/CEC writes silently do
+# nothing. The reference telnet clients all send "\r\n"; so do we.
+CMD_TERMINATOR = "\r\n"
 
 # How long to keep reading a telnet response after the last byte before giving up.
 READ_IDLE_TIMEOUT = 0.3

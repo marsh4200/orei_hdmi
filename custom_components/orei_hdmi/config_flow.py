@@ -67,8 +67,10 @@ class OreiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._abort_if_unique_id_configured()
 
             try:
-                transport, model, num_inputs, num_outputs = await async_probe_transport(
-                    self.hass, host, http_port, telnet_port
+                transport, model, num_inputs, num_outputs, telnet_port = (
+                    await async_probe_transport(
+                        self.hass, host, http_port, telnet_port
+                    )
                 )
             except Exception:  # noqa: BLE001
                 errors["base"] = "cannot_connect"

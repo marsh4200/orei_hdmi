@@ -494,23 +494,42 @@ class OreiHttpClient:
 # =============================================================================
 async def async_probe_transport(
     hass: HomeAssistant, host: str, http_port: int, telnet_port: int
-) -> tuple[str, str, int, int]:
-    """Detect the best transport. Tries HTTP first, then telnet."""
+) -> tuple[str, str, int, int, int]:
+    """Detect the best transport. Tries HTTP first, then telnet.
+
+    Returns ``(transport, model, num_inputs, num_outputs, telnet_port)``. The
+    telnet port is echoed back because OREI models split across 23 and 8000, so
+    we try the requested port and then the other common one rather than trusting
+    a single default — a wrong default was silently causing 'cannot_connect'.
+    """
     try:
         http = OreiHttpClient(hass, host, http_port)
         model, num_in, num_out = await http.probe()
         _LOGGER.debug("HTTP transport detected for %s", host)
-        return TRANSPORT_HTTP, model, num_in, num_out
+        return TRANSPORT_HTTP, model, num_in, num_out, telnet_port
     except Exception as err:  # noqa: BLE001
         _LOGGER.debug("HTTP probe failed for %s (%s); trying telnet", host, err)
 
-    telnet = OreiHdmiClient(host, telnet_port)
-    try:
-        await telnet.connect()
-        model, num_in, num_out = await telnet.probe()
-        return TRANSPORT_TELNET, model, num_in, num_out
-    finally:
-        await telnet.disconnect()
+    candidates: list[int] = []
+    for port in (telnet_port, 23, 8000):
+        if port and port not in candidates:
+            candidates.append(port)
+
+    last_err: Exception | None = None
+    for port in candidates:
+        telnet = OreiHdmiClient(host, port)
+        try:
+            await telnet.connect()
+            model, num_in, num_out = await telnet.probe()
+            _LOGGER.debug("Telnet transport detected for %s on port %s", host, port)
+            return TRANSPORT_TELNET, model, num_in, num_out, port
+        except Exception as err:  # noqa: BLE001
+            last_err = err
+            _LOGGER.debug("Telnet probe on %s:%s failed (%s)", host, port, err)
+        finally:
+            await telnet.disconnect()
+
+    raise last_err or ConnectionError(f"No OREI transport reachable at {host}")
 
 
 def build_client(
