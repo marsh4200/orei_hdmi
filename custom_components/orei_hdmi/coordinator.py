@@ -61,10 +61,23 @@ def _empty_rich() -> dict:
         "beep": None,
     }
 
+def _as_list(value) -> list:
+    """Coerce a device-reported field to a list.
 
-# =============================================================================
-# Telnet transport
-# =============================================================================
+    OREI firmware is inconsistent: an ``all*`` field that is normally an array
+    can come back as a bare scalar (or null) on some models/states. ``.get(k, [])``
+    doesn't help there — the key is present, just not a list — so any ``len()`` or
+    positional access on it raises ``object of type 'int' has no len()`` and takes
+    the whole poll (and setup) down. Normalising here keeps parsing total.
+    """
+    if isinstance(value, list):
+        return value
+    if value is None:
+        return []
+    return [value]
+
+
+
 class OreiHdmiClient:
     """Async client for controlling an OREI HDMI matrix over TCP/telnet."""
 
@@ -396,7 +409,7 @@ class OreiHttpClient:
     @staticmethod
     def _names(arr, skip_prefixes: tuple[str, ...] = ()) -> dict[int, str]:
         names: dict[int, str] = {}
-        for idx, name in enumerate(arr or []):
+        for idx, name in enumerate(_as_list(arr)):
             if not isinstance(name, str) or not name.strip():
                 continue
             low = name.strip().lower()
@@ -407,16 +420,17 @@ class OreiHttpClient:
 
     @staticmethod
     def _by_index(arr, count: int, cast=int) -> dict[int, object]:
+        arr = _as_list(arr)
         out: dict[int, object] = {}
         for idx in range(count):
-            if idx < len(arr or []):
+            if idx < len(arr):
                 out[idx + 1] = cast(arr[idx])
         return out
 
     async def probe(self) -> tuple[str, int, int]:
         video = await self.get_video_status()
-        num_in = len(video.get("allinputname", [])) or 4
-        num_out = len(video.get("alloutputname", [])) or 4
+        num_in = len(_as_list(video.get("allinputname"))) or 4
+        num_out = len(_as_list(video.get("alloutputname"))) or 4
         self.set_counts(max(1, min(num_in, 32)), max(1, min(num_out, 32)))
         return await self.get_type(), self._num_in, self._num_out
 
@@ -431,7 +445,7 @@ class OreiHttpClient:
 
         # Routing: allsource[i] = input feeding output i+1 (trailing 0 = padding).
         routing: dict[int, int] = {}
-        allsource = video.get("allsource", [])
+        allsource = _as_list(video.get("allsource"))
         for idx in range(min(n_out, len(allsource))):
             src = allsource[idx]
             if src:
@@ -447,12 +461,12 @@ class OreiHttpClient:
 
         # Input signal: inactive[i] == 0 -> signal present.
         in_links: dict[int, bool] = {}
-        for idx, val in enumerate(input_st.get("inactive", [])[:n_in]):
+        for idx, val in enumerate(_as_list(input_st.get("inactive"))[:n_in]):
             in_links[idx + 1] = val == 0
 
         # Output connection: allconnect (OR allhdbtconnect where the model has it).
-        hdmi = output.get("allconnect", [])
-        hdbt = output.get("allhdbtconnect", [])
+        hdmi = _as_list(output.get("allconnect"))
+        hdbt = _as_list(output.get("allhdbtconnect"))
         out_links: dict[int, bool] = {}
         for idx in range(n_out):
             h = hdmi[idx] if idx < len(hdmi) else 0
